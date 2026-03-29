@@ -485,7 +485,7 @@ public class NetworkBufferPool
             if (isDestroyed) {
                 throw new IllegalStateException("Network buffer pool has already been destroyed.");
             }
-            LOG.info("will21 network buffer: numTotalRequiredBuffers: {}, numRequiredBuffers:{}, currentThread: {}", numTotalRequiredBuffers, numRequiredBuffers, Thread.currentThread().toString());
+//            LOG.info("will21 network buffer: numTotalRequiredBuffers: {}, numRequiredBuffers:{}, currentThread: {}", numTotalRequiredBuffers, numRequiredBuffers, Thread.currentThread().toString());
 
             // Ensure that the number of required buffers can be satisfied.
             // With dynamic memory management this should become obsolete.

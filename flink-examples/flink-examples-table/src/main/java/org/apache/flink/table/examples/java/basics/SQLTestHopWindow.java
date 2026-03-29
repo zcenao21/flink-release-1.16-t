@@ -65,10 +65,12 @@ public class SQLTestHopWindow {
         tEnv.createTemporaryView("wordTable", table);
 
         String query = " select"
-                + " hop_start(word_process_time,interval '1' second,interval '3' second) as hop_start,"
+                + " hop_start(word_process_time,interval '1' second,interval '3' hour) as hop_start,"
+                + " word,"
+                + " concat(word,'xx') as new_word,"
                 + " count(1)"
                 + " from wordTable"
-                + " group by hop(word_process_time,interval '1' second,interval '3' second)";
+                + " group by hop(word_process_time,interval '1' second,interval '3' hour),word,concat(word,'xx')";
         TableResult tableRes = tEnv.executeSql(query);
         tableRes.print();
 

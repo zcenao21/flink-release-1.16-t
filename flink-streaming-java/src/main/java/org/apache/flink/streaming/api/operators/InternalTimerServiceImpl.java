@@ -279,7 +279,7 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 
         InternalTimer<K, N> timer;
 
-        System.out.println("// will21: onProcessingTime: " + new SimpleDateFormat("HH:mm:ss.SSS").format(time) + " 当前queue size:" + processingTimeTimersQueue.size());
+//        System.out.printf("// will21: onProcessingTime: %12s 当前queue size: %10d 当前key:%20s\n" ,new SimpleDateFormat("HH:mm:ss.SSS").format(time), processingTimeTimersQueue.size(), keyContext.getCurrentKey());
         while ((timer = processingTimeTimersQueue.peek()) != null && timer.getTimestamp() <= time) {
             keyContext.setCurrentKey(timer.getKey());
             processingTimeTimersQueue.poll();
@@ -287,7 +287,7 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
         }
 
         if (timer != null && nextTimer == null) {
-            System.out.println("// will21: 注册未来触发时间 " + new SimpleDateFormat("HH:mm:ss.SSS").format(timer.getTimestamp()) + " 当前queue size:" + processingTimeTimersQueue.size());
+//            System.out.println("// will21: 注册未来触发时间 " + new SimpleDateFormat("HH:mm:ss.SSS").format(timer.getTimestamp()) + " 当前queue size:" + processingTimeTimersQueue.size());
             nextTimer =
                     processingTimeService.registerTimer(
                             timer.getTimestamp(), this::onProcessingTime);
