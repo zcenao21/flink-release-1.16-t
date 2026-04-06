@@ -44,7 +44,7 @@ public class SQLTestHopWindow {
         // to building a Flink application.
         Configuration configuration = new Configuration();
         configuration.setInteger(RestOptions.PORT, 9091);
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(new Configuration());
+        final StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(configuration);
         env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime);
 
         final StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
@@ -65,7 +65,7 @@ public class SQLTestHopWindow {
         tEnv.createTemporaryView("wordTable", table);
 
         String query = " select"
-                + " hop_start(word_process_time,interval '1' second,interval '3' hour) as hop_start,"
+                + " hop_end(word_process_time,interval '1' second,interval '3' hour) as hop_start,"
                 + " word,"
                 + " concat(word,'xx') as new_word,"
                 + " count(1)"

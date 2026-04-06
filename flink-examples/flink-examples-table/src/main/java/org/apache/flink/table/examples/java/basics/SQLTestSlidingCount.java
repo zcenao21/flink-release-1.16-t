@@ -43,7 +43,7 @@ import static org.apache.flink.table.api.Expressions.$;
 public class SQLTestSlidingCount {
         public static void main(String[] args) throws Exception {
             Configuration configuration = new Configuration();
-            configuration.setInteger(RestOptions.PORT, 9091);
+            configuration.setInteger(RestOptions.PORT, 8081);
             final StreamExecutionEnvironment env =
                     StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(configuration);
 

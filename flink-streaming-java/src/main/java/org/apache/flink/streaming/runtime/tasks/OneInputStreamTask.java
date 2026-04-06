@@ -126,6 +126,100 @@ public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamO
         getEnvironment()
                 .getMetricGroup()
                 .gauge(MetricNames.IO_CURRENT_INPUT_WATERMARK, inputWatermarkGauge::getValue);
+
+        // ---- 打印 OneInputStreamTask 内部封装结构 ----
+        printTaskStructure();
+    }
+
+    private void printTaskStructure() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\nwill21");
+        sb.append("╔══════════════════════════════════════════════════════════════╗\n");
+        sb.append("║          OneInputStreamTask 内部封装结构                      ║\n");
+        sb.append("╠══════════════════════════════════════════════════════════════╣\n");
+        sb.append(String.format("║ Task名称    : %-48s║\n", getName()));
+        sb.append(String.format("║ Task类      : %-48s║\n", this.getClass().getSimpleName()));
+        sb.append("╠══════════════════════════════════════════════════════════════╣\n");
+        sb.append("║ 封装层次 (从外到内):                                           ║\n");
+        sb.append("║                                                              ║\n");
+
+        // 第1层: OneInputStreamTask 自身
+        sb.append(String.format("║  [1] %-57s║\n", this.getClass().getName()));
+        sb.append("║      │                                                       ║\n");
+
+        // 第2层: mainOperator (StreamFlatMap 等)
+        if (mainOperator != null) {
+            sb.append(String.format("║  [2] mainOperator: %-43s║\n",
+                    mainOperator.getClass().getSimpleName()));
+            sb.append("║      │   完整类名: " + padRight(mainOperator.getClass().getName(), 343) + "║\n");
+            sb.append("║      │                                                       ║\n");
+
+            // 第3层: userFunction（通过反射从 AbstractUdfStreamOperator 取）
+            try {
+                java.lang.reflect.Field f =
+                        org.apache.flink.streaming.api.operators.AbstractUdfStreamOperator.class
+                                .getDeclaredField("userFunction");
+                f.setAccessible(true);
+                Object userFunc = f.get(mainOperator);
+                if (userFunc != null) {
+                    sb.append(String.format("║  [3] userFunction: %-43s║\n",
+                            userFunc.getClass().getSimpleName()));
+                    sb.append("║      │   完整类名: " + padRight(userFunc.getClass().getName(), 343) + "║\n");
+                    sb.append("║      │   父接口  : ");
+                    for (Class<?> iface : userFunc.getClass().getInterfaces()) {
+                        sb.append(iface.getSimpleName()).append(" ");
+                    }
+                    sb.append("\n");
+
+                    // 打印 userFunction 声明的方法
+                    sb.append("║      │   实现方法:\n");
+                    for (java.lang.reflect.Method m : userFunc.getClass().getDeclaredMethods()) {
+                        sb.append(String.format("║      │     - %s(%s)\n",
+                                m.getName(),
+                                java.util.Arrays.stream(m.getParameterTypes())
+                                        .map(Class::getSimpleName)
+                                        .collect(java.util.stream.Collectors.joining(", "))));
+                    }
+                } else {
+                    sb.append("║  [3] userFunction: null (非 UDF 算子)                       ║\n");
+                }
+            } catch (Exception e) {
+                sb.append("║  [3] userFunction: (非 AbstractUdfStreamOperator，无 UDF)     ║\n");
+            }
+        } else {
+            sb.append("║  [2] mainOperator: null                                      ║\n");
+        }
+
+        sb.append("║                                                              ║\n");
+        sb.append("╠══════════════════════════════════════════════════════════════╣\n");
+
+        // 打印 OperatorChain 中所有 chained operator
+        sb.append("║ OperatorChain 中的全部算子:                                    ║\n");
+        int[] idx = {1};
+        operatorChain.getAllOperators(false).forEach(wrapper -> {
+            org.apache.flink.streaming.api.operators.StreamOperator<?> op =
+                    wrapper.getStreamOperator();
+            sb.append(String.format("║   [%d] %-56s║\n", idx[0]++, op.getClass().getSimpleName()));
+            try {
+                java.lang.reflect.Field f =
+                        org.apache.flink.streaming.api.operators.AbstractUdfStreamOperator.class
+                                .getDeclaredField("userFunction");
+                f.setAccessible(true);
+                Object uf = f.get(op);
+                if (uf != null) {
+                    sb.append(String.format("║        └─ UDF: %-47s║\n",
+                            uf.getClass().getName()));
+                }
+            } catch (Exception ignored) {}
+        });
+
+        sb.append("╚══════════════════════════════════════════════════════════════╝\n");
+        System.out.println(sb);
+    }
+
+    private static String padRight(String s, int n) {
+        if (s.length() >= n) return s.substring(0, n - 3) + "...";
+        return String.format("%-" + n + "s", s);
     }
 
     @Override

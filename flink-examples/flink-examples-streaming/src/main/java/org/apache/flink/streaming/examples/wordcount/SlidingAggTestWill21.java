@@ -35,8 +35,6 @@ import org.apache.flink.streaming.examples.wordcount.util.CLI;
 import org.apache.flink.util.Collector;
 
 import java.time.Duration;
-import java.util.Iterator;
-import java.util.Map;
 
 public class SlidingAggTestWill21 {
 
@@ -68,7 +66,7 @@ public class SlidingAggTestWill21 {
                         .name("tokenizer-with-timestamp");
 
         // 2. 按单词分组，应用滑动窗口统计
-        DataStream<Tuple3<String, Long, Long>> counts =
+        DataStream<Tuple3<String, Long, String>> counts =
                 wordsWithTimestamp
                         .keyBy(value -> value.f0)  // 按单词分组
                         .process(new SlidingWindowCountFunction(WINDOW_SIZE_MS))
@@ -77,7 +75,7 @@ public class SlidingAggTestWill21 {
         if (params.getOutput().isPresent()) {
             // Given an output directory, Flink will write the results to a file
             counts.sinkTo(
-                            FileSink.<Tuple3<String, Long, Long>>forRowFormat(
+                            FileSink.<Tuple3<String, Long, String>>forRowFormat(
                                             params.getOutput().get(), new SimpleStringEncoder<>())
                                     .withRollingPolicy(
                                             DefaultRollingPolicy.builder()
@@ -131,10 +129,10 @@ public class SlidingAggTestWill21 {
      * 2. 旧单词过期 → 计数减少 → 输出
      * 3. 只在统计值变化时输出
      *
-     * 输出格式: (word, count, timestamp)
+     * 输出格式: (word, count, formatted-timestamp)
      */
     public static class SlidingWindowCountFunction
-            extends KeyedProcessFunction<String, Tuple3<String, Integer, Long>, Tuple3<String, Long, Long>> {
+            extends KeyedProcessFunction<String, Tuple3<String, Integer, Long>, Tuple3<String, Long, String>> {
 
         private final long windowSizeMs;
 
@@ -172,11 +170,22 @@ public class SlidingAggTestWill21 {
         public void processElement(
                 Tuple3<String, Integer, Long> value,
                 Context ctx,
-                Collector<Tuple3<String, Long, Long>> out) throws Exception {
+                Collector<Tuple3<String, Long, String>> out) throws Exception {
 
             String word = value.f0;
             long inputTimestamp = value.f2;
-            long currentProcessingTime = ctx.timerService().currentProcessingTime();
+            long currentProcessingTime = ctx.timerService().currentProcessingTime(); // 用于输出时间戳
+
+            // 0. 过滤迟到超过窗口大小的乱序数据：其事件时间已超出窗口范围，直接丢弃
+            //    若不过滤，这条数据会被加入计数后几乎立刻被定时器清除，产生短暂的计数抖动
+            if (inputTimestamp < currentProcessingTime - windowSizeMs) {
+                System.out.println(String.format(
+                        "[%s] Word: %s, DROPPED late data (inputTs=%s, late by %dms)",
+                        formatTimestamp(currentProcessingTime), word,
+                        formatTimestamp(inputTimestamp),
+                        currentProcessingTime - windowSizeMs - inputTimestamp));
+                return;
+            }
 
             // 1. 更新该时间戳的计数
             Long countAtTimestamp = timestampCountState.get(inputTimestamp);
@@ -194,20 +203,15 @@ public class SlidingAggTestWill21 {
             totalCount += 1;
             totalCountState.update(totalCount);
 
-            // 3. 注册过期定时器（在10秒后触发）
+            // 3. 注册过期定时器（在10秒后触发，onTimer 会精确清理该时间点的数据，O(1)）
             long expiryTime = inputTimestamp + windowSizeMs;
             ctx.timerService().registerProcessingTimeTimer(expiryTime);
 
-            // 4. 清理已经过期的数据（基于当前处理时间）
-            long windowStart = currentProcessingTime - windowSizeMs;
-            totalCount = cleanExpiredData(windowStart, totalCount);
-            totalCountState.update(totalCount);
-
-            // 5. 检查是否有变化，有变化才输出
+            // 4. 检查是否有变化，有变化才输出
             Long lastEmittedCount = lastEmittedCountState.value();
             if (lastEmittedCount == null || !lastEmittedCount.equals(totalCount)) {
-                // 输出: (单词, 当前计数, 当前时间)
-                out.collect(new Tuple3<>(word, totalCount, currentProcessingTime));
+                // 输出: (单词, 当前计数, 格式化时间)
+                out.collect(new Tuple3<>(word, totalCount, formatTimestamp(currentProcessingTime)));
                 lastEmittedCountState.update(totalCount);
 
                 // 打印日志，方便观察
@@ -222,7 +226,7 @@ public class SlidingAggTestWill21 {
         public void onTimer(
                 long timestamp,
                 OnTimerContext ctx,
-                Collector<Tuple3<String, Long, Long>> out) throws Exception {
+                Collector<Tuple3<String, Long, String>> out) throws Exception {
 
             // 定时器触发：某个时间点的数据过期了
             long expiredTimestamp = timestamp - windowSizeMs;
@@ -243,8 +247,8 @@ public class SlidingAggTestWill21 {
                         // 获取当前单词（从 key 中获取）
                         String word = ctx.getCurrentKey();
 
-                        // 输出: (单词, 当前计数, 当前时间)
-                        out.collect(new Tuple3<>(word, totalCount, timestamp));
+                        // 输出: (单词, 当前计数, 格式化时间)
+                        out.collect(new Tuple3<>(word, totalCount, formatTimestamp(timestamp)));
                         lastEmittedCountState.update(totalCount);
 
                         // 打印日志，方便观察
@@ -258,29 +262,6 @@ public class SlidingAggTestWill21 {
                 // 4. 删除过期的数据
                 timestampCountState.remove(expiredTimestamp);
             }
-        }
-
-        /**
-         * 清理过期数据（用于处理乱序或延迟数据）
-         * @param windowStart 窗口起始时间
-         * @param currentTotal 当前总计数
-         * @return 清理后的总计数
-         */
-        private long cleanExpiredData(long windowStart, long currentTotal) throws Exception {
-            long updatedTotal = currentTotal;
-            Iterator<Map.Entry<Long, Long>> iterator = timestampCountState.entries().iterator();
-
-            while (iterator.hasNext()) {
-                Map.Entry<Long, Long> entry = iterator.next();
-                if (entry.getKey() < windowStart) {
-                    // 从总数中减去过期的计数
-                    updatedTotal -= entry.getValue();
-                    // 删除过期数据
-                    iterator.remove();
-                }
-            }
-
-            return updatedTotal;
         }
 
         /**
